@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include "MegunoLink.h"
 #include "Filter.h"
 #include <Wire.h> //temperatur
@@ -26,6 +27,15 @@ char messages[50]; //Homeassistant
 #define y_ner_Pin 23 //y_ner
 #define ledOnPin 14
 
+void setInputFlags();
+void resolveInputFlags();
+void inputAction(int input);
+void parameterChange(int key);
+void printScreen();
+void setupWiFi(); //Homeassistant
+void reconnect(); //Homeassistant
+void publishMessage(); //Homeassistant
+
 //Input & Button Logic
 const int numOfInputs = 4;
 const int inputPins[numOfInputs] = {x_up_Pin, x_ner_Pin, y_up_Pin, y_ner_Pin};
@@ -53,6 +63,8 @@ int filterWeight;
 bool button;
 long  previousTime = 0;
 long currentTime = 0;
+long timeLastPressed = 0;
+const long timeBeforeDisable = 10000;
 
 int dry = 3200;
 int wet = 1100;
@@ -96,7 +108,6 @@ void setup() {
   }
   lcd.begin();
   lcd.display();
-  lcd.backlight();
 }
 
 void loop() {
@@ -105,6 +116,17 @@ void loop() {
   
   setInputFlags();
   resolveInputFlags();
+  if(millis() - timeLastPressed > timeBeforeDisable)
+  {
+    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    lcd.noBacklight();
+  }
+  else
+  {
+    display.ssd1306_command(SSD1306_DISPLAYON);
+    lcd.backlight();
+  }
+    
 
   threshold = parameters[2];
   overshoot = parameters[3];
@@ -219,8 +241,7 @@ void loop() {
   {
     //Serial.print("Sending messages: ");
     //Serial.println(messages);
-    snprintf(messages, 10, "%ld", (int)current_moisture); //Homeassistant
-    client.publish(privates.outTopic, messages); //Homeassistant
+    publishMessage();
     previousTime = millis();
   }
 }
@@ -243,6 +264,7 @@ void setInputFlags() {
 void resolveInputFlags() {
   for (int i = 0; i < numOfInputs; i++) {
     if (inputFlags[i] == HIGH) {
+      timeLastPressed = millis();
       inputAction(i);
       inputFlags[i] = LOW;
       printScreen();
@@ -323,35 +345,38 @@ void printScreen() {
 
 void setupWiFi() //Homeassistant
 {
-  Serial.print("\nConnecting to ");
-  Serial.print(privates.ssid);
-
   WiFi.begin(privates.ssid, privates.pass);
-
-  while(WiFi.status() != WL_CONNECTED)
-  {
-    delay(100);
-    Serial.print(".");
-  }
-  Serial.print("\nConnected to ");
-  Serial.println(privates.ssid);
-  
+  // Serial.print("\nConnecting to ");
+  // Serial.print(privates.ssid);
+  // while(WiFi.status() != WL_CONNECTED)
+  // {
+  //   delay(100);
+  //   Serial.print(".");
+  // }
+  // Serial.print("\nConnected to ");
+  // Serial.println(privates.ssid);
 }
 void reconnect() //Homeassistant
 {
-  while(!client.connected())
+  // Serial.print("\nConnecting to ");
+  // Serial.println(privates.broker);
+  if(client.connect("boll", privates.brokerUser, privates.brokerPass))
   {
-    Serial.print("\nConnecting to ");
-    Serial.println(privates.broker);
-    if(client.connect("boll", privates.brokerUser, privates.brokerPass))
-    {
-      Serial.print("\nConnected to ");
-      Serial.println(privates.broker);
-    }
-    else
-    {
-      Serial.println("\nTrying connect again");
-      delay(4000);
-    }
+    // Serial.print("\nConnected to ");
+    // Serial.println(privates.broker);
   }
+  else
+  {
+    // Serial.println("\nTrying connect again");
+  }
+}
+
+void publishMessage() //Homeassistant
+{
+    if(!client.connected()){reconnect();}
+    client.loop();
+    snprintf(messages, 10, "%ld", (int)current_moisture); //Homeassistant
+    client.publish(privates.topicSoilHumidity, messages); //Homeassistant
+    snprintf(messages, 10, "%ld", (int)current_temp_DS18B20); //Homeassistant
+    client.publish(privates.topicAirTemp, messages); //Homeassistant
 }
